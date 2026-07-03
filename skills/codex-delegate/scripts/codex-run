@@ -6,23 +6,23 @@ set -e
 
 usage() {
   cat >&2 <<'EOF'
-usage: codex-run <type> [options] "PROMPT"
-       codex-run <type> [options] < prompt.txt
+usage: codex-run <mode> [options] "PROMPT"
+       codex-run <mode> [options] < prompt.txt
 
-types:
-  review      code review of the working changes (read-only)
-  implement   write code for a bounded task (workspace-write)
-  diagnose    root-cause a bug/failure (read-only)
-  research    explore and explain the codebase (read-only)
+modes (sandbox + invocation only — the prompt is entirely yours):
+  read        codex exec, read-only  — inspect, diagnose, explain; touches nothing
+  write       codex exec, workspace-write — Codex may edit files
+  review      codex exec review, read-only — Codex diffs the repo itself
 
 options:
   -m, --model <M>     model to use (default: Codex config)
   -C, --cd <DIR>      working root (default: current dir)
-      --add-dir <D>   extra writable dir (implement only, repeatable)
+      --add-dir <D>   extra writable dir (write mode only, repeatable)
       --resume        continue the most recent Codex session in this dir
       --session <ID>  resume a specific session id/name
       --json          stream raw JSONL events instead of the final message
       --schema <FILE> JSON Schema for a structured final response
+      --no-git        allow running outside a git repository
   review-only:
       --uncommitted   review staged + unstaged + untracked changes
       --base <BRANCH> review changes against a base branch
@@ -33,9 +33,9 @@ EOF
 
 TYPE="${1:-}"; shift 2>/dev/null || true
 case "$TYPE" in
-  review|implement|diagnose|research) ;;
+  read|write|review) ;;
   -h|--help|"") usage; exit 2 ;;
-  *) echo "codex-run: unknown type '$TYPE'" >&2; usage; exit 2 ;;
+  *) echo "codex-run: unknown mode '$TYPE'" >&2; usage; exit 2 ;;
 esac
 
 MODEL=""; CD=""; SESSION=""; RESUME=0; JSON=0; SCHEMA=""; PROMPT=""; NOGIT=0
@@ -73,10 +73,10 @@ if [ "$resuming" -eq 1 ]; then
   if [ -n "$SESSION" ]; then cmd+=("$SESSION"); else cmd+=(--last); fi
 else
   case "$TYPE" in
-    review)             cmd+=(review "${REVIEW_ARGS[@]}") ;;
-    implement)          cmd+=(-s workspace-write)
-                        for d in "${ADD_DIRS[@]}"; do cmd+=(--add-dir "$d"); done ;;
-    diagnose|research)  cmd+=(-s read-only) ;;
+    review) cmd+=(review "${REVIEW_ARGS[@]}") ;;
+    write)  cmd+=(-s workspace-write)
+            for d in "${ADD_DIRS[@]}"; do cmd+=(--add-dir "$d"); done ;;
+    read)   cmd+=(-s read-only) ;;
   esac
 fi
 
