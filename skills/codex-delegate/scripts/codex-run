@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Drive `codex exec` as a sub-agent for a typed task.
+# stdout = Codex's final message (clean). stderr = live progress.
+# With --json, raw JSONL events stream to stdout instead.
+set -e
+
+usage() {
+  cat >&2 <<'EOF'
+usage: codex-run <type> [options] "PROMPT"
+       codex-run <type> [options] < prompt.txt
+
+types:
+  review      code review of the working changes (read-only)
+  implement   write code for a bounded task (workspace-write)
+  diagnose    root-cause a bug/failure (read-only)
+  research    explore and explain the codebase (read-only)
+
+options:
+  -m, --model <M>     model to use (default: Codex config)
+  -C, --cd <DIR>      working root (default: current dir)
+      --add-dir <D>   extra writable dir (implement only, repeatable)
+      --resume        continue the most recent Codex session in this dir
+      --session <ID>  resume a specific session id/name
+      --json          stream raw JSONL events instead of the final message
+      --schema <FILE> JSON Schema for a structured final response
+  review-only:
+      --uncommitted   review staged + unstaged + untracked changes
+      --base <BRANCH> review changes against a base branch
+      --commit <SHA>  review a single commit
+  --                  pass the rest through to codex verbatim
+EOF
+}
+
+TYPE="${1:-}"; shift 2>/dev/null || true
+case "$TYPE" in
+  review|implement|diagnose|research) ;;
+  -h|--help|"") usage; exit 2 ;;
+  *) echo "codex-run: unknown type '$TYPE'" >&2; usage; exit 2 ;;
+esac
+
+MODEL=""; CD=""; SESSION=""; RESUME=0; JSON=0; SCHEMA=""; PROMPT=""; NOGIT=0
+ADD_DIRS=(); REVIEW_ARGS=(); PASS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -m|--model)   MODEL="$2"; shift 2 ;;
+    -C|--cd)      CD="$2"; shift 2 ;;
+    --add-dir)    ADD_DIRS+=("$2"); shift 2 ;;
+    --resume)     RESUME=1; shift ;;
+    --session)    SESSION="$2"; shift 2 ;;
+    --json)       JSON=1; shift ;;
+    --no-git)     NOGIT=1; shift ;;
+    --schema)     SCHEMA="$2"; shift 2 ;;
+    --uncommitted) REVIEW_ARGS+=(--uncommitted); shift ;;
+    --base)       REVIEW_ARGS+=(--base "$2"); shift 2 ;;
+    --commit)     REVIEW_ARGS+=(--commit "$2"); shift 2 ;;
+    --)           shift; PASS=("$@"); break ;;
+    -*)           PASS+=("$1"); shift ;;
+    *)            PROMPT="$1"; shift ;;
+  esac
+done
+
+[ -n "$CD" ] && cd "$CD"
+
+# Build the codex invocation.
+resuming=0
+[ "$RESUME" -eq 1 ] && resuming=1
+[ -n "$SESSION" ] && resuming=1
+
+cmd=(codex exec)
+if [ "$resuming" -eq 1 ]; then
+  cmd+=(resume)
+  if [ -n "$SESSION" ]; then cmd+=("$SESSION"); else cmd+=(--last); fi
+else
+  case "$TYPE" in
+    review)             cmd+=(review "${REVIEW_ARGS[@]}") ;;
+    implement)          cmd+=(-s workspace-write)
+                        for d in "${ADD_DIRS[@]}"; do cmd+=(--add-dir "$d"); done ;;
+    diagnose|research)  cmd+=(-s read-only) ;;
+  esac
+fi
+
+[ -n "$MODEL" ]  && cmd+=(-m "$MODEL")
+[ -n "$SCHEMA" ] && cmd+=(--output-schema "$SCHEMA")
+[ "$NOGIT" -eq 1 ] && [ "$resuming" -eq 0 ] && cmd+=(--skip-git-repo-check)
+
+# Prompt as positional arg; read from stdin only when no prompt was given.
+PROMPT_ARG="-"; [ -n "$PROMPT" ] && PROMPT_ARG="$PROMPT"
+
+# Run Codex, closing stdin when a prompt was supplied so it never blocks on it.
+run() { if [ -n "$PROMPT" ]; then "$@" </dev/null; else "$@"; fi; }
+
+if [ "$JSON" -eq 1 ]; then
+  full=("${cmd[@]}" --json "${PASS[@]}" "$PROMPT_ARG")
+  if [ -n "${CODEX_RUN_DRYRUN:-}" ]; then printf '%s ' "${full[@]}" >&2; echo >&2; exit 0; fi
+  run "${full[@]}"; exit $?
+fi
+
+LAST="$(mktemp)"
+full=("${cmd[@]}" -o "$LAST" "${PASS[@]}" "$PROMPT_ARG")
+if [ -n "${CODEX_RUN_DRYRUN:-}" ]; then printf '%s ' "${full[@]}" >&2; echo >&2; rm -f "$LAST"; exit 0; fi
+trap 'rm -f "$LAST"' EXIT
+# Codex's own stdout (progress) goes to stderr; emit only the final message.
+run "${full[@]}" 1>&2
+cat "$LAST"
