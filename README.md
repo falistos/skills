@@ -32,7 +32,7 @@ Skills are plain folders — you can also just copy any `skills/<name>/` directo
 |---|---|
 | [orchestrate](skills/orchestrate) | Build a large feature, project, or refactor as a lead orchestrator: lock the spec, freeze shared interface contracts, decompose into self-contained task files, dispatch sub-agents in dependency-ordered waves (one model per task), verify each wave, and run a final integration pass. |
 | [step-by-step](skills/step-by-step) | Iterate through a list of findings (from a review, analysis, or audit) one item at a time: explain, propose approaches, wait for your go, implement, verify, optionally Codex-review, then make an atomic commit per item. |
-| [codex-delegate](skills/codex-delegate) | Drive the OpenAI Codex CLI as a sub-agent through a thin wrapper over `codex exec`. Primitive modes (`read` / `write` / `review`) set the sandbox and invocation; you write the prompt. Returns Codex's final message clean on stdout. |
+| [codex-delegate](skills/codex-delegate) | Drive the OpenAI Codex CLI (`codex exec`) directly as a sub-agent for review, implementation, diagnosis, or research — including fanning out and tracking several Codex workers in parallel and managing their sessions. |
 
 ### orchestrate
 

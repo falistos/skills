@@ -1,74 +1,83 @@
 ---
 name: codex-delegate
-description: Delegate a bounded task to the OpenAI Codex CLI as a sub-agent — a second-opinion code review or adversarial pass, a scoped implementation/fix, a root-cause diagnosis, or a codebase exploration — driven through a thin controllable wrapper over `codex exec`. Use whenever you want Codex (GPT-5.x) to independently work a task in parallel to your own reasoning: "ask Codex", "get a second opinion from Codex", "have Codex review this diff", "let Codex implement X", "run codex on this", "adversarial review with Codex", "what does GPT-5 think". This is the general, intentional way to drive Codex; the wrapper exposes primitive modes (read / write / review) and you write the prompt. For the reflexive "I'm stuck, hand it off" case, `codex:rescue` still applies. Triggers in French too: "demande à Codex", "deuxième avis de Codex", "fais reviewer par Codex", "délègue à Codex", "lance codex là-dessus".
+description: Delegate a bounded task to the OpenAI Codex CLI as a sub-agent — a second-opinion code review or adversarial pass, a scoped implementation/fix, a root-cause diagnosis, or a codebase exploration — by driving `codex exec` directly. Use whenever you want Codex (GPT-5.x) to independently work a task in parallel to your own reasoning: "ask Codex", "get a second opinion from Codex", "have Codex review this diff", "let Codex implement X", "run codex on this", "adversarial review with Codex", "what does GPT-5 think", or when you want to fan out several Codex workers and track them. For the reflexive "I'm stuck, hand it off" case, `codex:rescue` still applies. Triggers in French too: "demande à Codex", "deuxième avis de Codex", "fais reviewer par Codex", "délègue à Codex", "lance codex là-dessus", "plusieurs codex en parallèle".
 user-invocable: true
-args: "[optional: mode (read|write|review) and/or what to delegate — omit to be asked]"
+args: "[optional: what to delegate to Codex — omit to be asked]"
 ---
 
-# codex-delegate — drive Codex CLI as a sub-agent
+# codex-delegate — drive the Codex CLI as a sub-agent
 
-Hand a bounded task to the Codex CLI (GPT-5.x) so it works independently, in parallel to your own reasoning. A second engine is worth most when you want an *independent* take (review, adversarial verification, a diagnosis you can cross-check) or when offloading a self-contained chunk while you do something else.
+Hand a bounded task to the Codex CLI (GPT-5.x) so it works independently, in parallel to your own reasoning. Worth most when you want an *independent* take (review, adversarial verification, a diagnosis you can cross-check) or when offloading a self-contained chunk while you do other work.
 
-Everything goes through the wrapper:
+You drive `codex` directly — no wrapper. This skill is the knowledge: the right invocation per intent, the output idiom, and how to run and track a fleet. Return Codex's output as-is; if you want to trust it before acting, verify it yourself (read the cited code, run the build/tests) — that's your call as the caller.
 
-```
-scripts/codex-run <mode> [options] "PROMPT"
-```
+## One-shot delegation
 
-The wrapper is a **primitive**: a mode only sets the sandbox and the Codex invocation. It injects no prompt of its own — the framing is entirely yours. What makes this better than a blind forwarder is that *you* pick the right primitive and write a sharp prompt, rather than hoping Codex guesses the intent.
-
-**Output contract:** stdout is Codex's final message (clean); stderr is live progress. Return Codex's output as-is — this skill does not second-guess it. If you want to trust it before acting, verify it yourself (read the cited code, run the build/tests); that's your call as the caller, not the wrapper's job.
-
-## The three modes
-
-Pick by what Codex needs to *do*, since the mode is also the safety boundary:
-
-| Mode | Sandbox | Invocation | For |
-|---|---|---|---|
-| `read` | read-only | `codex exec -s read-only` | Anything that only inspects: diagnose a bug, explain a module, explore an architecture, answer a question about the code. |
-| `write` | workspace-write | `codex exec -s workspace-write` | When you actually want Codex editing files: a scoped implementation or fix. |
-| `review` | read-only | `codex exec review` | Review the working changes / a diff / a branch. Codex fetches the diff itself. |
-
-`write` is the only mode that can change files — reach for it deliberately. `review` is separate from `read` because it's a distinct Codex sub-command that diffs the repo for you and unlocks the scoping flags below.
-
-## Writing the prompt
-
-The mode is mechanical; the prompt carries the intent. Give Codex an objective, the relevant paths, and the output you want — a vague prompt gets a vague result. Frame the intent explicitly since the tool won't:
+`codex exec` runs Codex non-interactively. The sandbox is the safety boundary — it's the one thing you must set deliberately:
 
 ```
-# diagnose (read)
-scripts/codex-run read "Root-cause why tests/payment_test.py fails with KeyError since HEAD~1. Trace it; don't propose fixes yet."
-
-# explain (read)
-scripts/codex-run read "Explain how the event bus in src/core wires publishers to subscribers."
-
-# implement (write)
-scripts/codex-run write "Add input validation to src/api/users.ts, following the existing pattern in src/api/auth.ts."
-
-# review the current changes (review — no need to describe the diff)
-scripts/codex-run review --uncommitted "Adversarial review: correctness bugs, edge cases, regressions."
-scripts/codex-run review --base main "Review this branch against main."
+codex exec -s read-only "PROMPT"        # inspect / diagnose / explain — touches nothing
+codex exec -s workspace-write "PROMPT"   # let Codex edit files (scoped implementation/fix)
 ```
 
-For a non-trivial task, use the `gpt-5-4-prompting` skill to tighten the prompt before delegating.
+The intent (diagnose vs explain vs implement) lives in your prompt, not a flag — give Codex an objective, the relevant paths, and the output you want. A vague prompt gets a vague result. For a non-trivial task, tighten it with the `gpt-5-4-prompting` skill first.
+
+**Clean output idiom.** In plain mode Codex mixes progress into stdout. To get just the final message, write it to a file with `-o` and read that:
+
+```
+codex exec -s read-only -o /tmp/cx.md "PROMPT" </dev/null >/dev/null 2>&1 && cat /tmp/cx.md
+```
+
+Two gotchas worth baking into every call:
+- `</dev/null` — close stdin so Codex never blocks waiting on it.
+- `--skip-git-repo-check` — Codex refuses to run outside a git repo; add this only when you deliberately run somewhere that isn't one.
+
+Other useful flags: `-m <model>` (leave unset to use Codex's configured model; set only when asked), `-C <dir>` (working root), `--add-dir <dir>` (extra writable dir), `--output-schema <file>` (force a JSON-Schema-shaped final response when you want to parse it).
+
+## Review mode
+
+For reviewing changes, `codex exec review` is purpose-built — Codex fetches the diff itself, so you don't describe it:
+
+```
+codex exec review --uncommitted -o /tmp/rev.md "Adversarial review: correctness bugs, edge cases, regressions." </dev/null
+codex exec review --base main "Review this branch against main."
+codex exec review --commit <sha> "..."
+```
 
 ## Foreground vs background
 
 - **Foreground** for a bounded task you're waiting on — the result comes back in the turn.
-- **Background** for anything open-ended or long: run the Bash call with `run_in_background: true` and keep working; you'll be notified on completion. Don't block a whole turn on a long Codex run.
+- **Background** for anything open-ended or long, and always when running several at once: launch each with your Bash tool in background mode and keep working. You're re-invoked when each finishes, so don't block a turn on a long run.
 
-## Options
+## Spawning and tracking a fleet
 
-- `-m, --model <M>` — leave unset by default (Codex uses its configured model). Set only when asked; pass names through verbatim (e.g. `gpt-5.3-codex-spark`).
-- `-C, --cd <DIR>` — run against another directory.
-- `--add-dir <DIR>` — extra writable dir for `write` (e.g. a sibling package).
-- `--resume` / `--session <ID>` — continue a previous Codex session in this dir ("keep going", "apply the top fix", "dig deeper"). The prompt is the follow-up.
-- `--schema <FILE>` — a JSON Schema for a structured final response, when you want to parse the output (e.g. review findings as JSON). stdout is then the JSON.
-- `--json` — stream raw JSONL events instead of the final message.
-- `--no-git` — allow running outside a git repository (Codex refuses by default).
-- `--` — everything after is passed to `codex` verbatim.
+To run several Codex workers at once, launch each as a background process writing to its own files, then track them. Keep the outputs in a gitignored dir (e.g. `.codex/`):
+
+```
+# one worker, launched in the background:
+codex exec --json -s read-only -o .codex/w1.msg "PROMPT" </dev/null >.codex/w1.jsonl 2>&1
+```
+
+- `--json` streams structured events to `w1.jsonl`; `-o` still writes the clean final message to `w1.msg`. You get both.
+- The **session id** is the first event: `{"type":"thread.started","thread_id":"019f…"}` — `head -1 .codex/w1.jsonl` gives it. Capture it per worker.
+- `{"type":"turn.completed",...}` at the end of the JSONL marks that worker done (with token usage); the final answer is in `w1.msg`.
+
+Tracking, without a wrapper:
+- **Completion** — you're notified as each background process exits; react to those rather than busy-polling. To check mid-flight, use your background-task tooling (list running tasks, read a task's output, stop one) or just read the worker's `.jsonl`/`.msg` files — they're yours, safe to read.
+- **Follow up on a specific worker** — resume by its captured id: `codex exec resume <thread_id> "next instruction"`. (`--last` only works when a single session is in play; with a fleet it's ambiguous — always resume by id.)
+
+**Parallelism caution.** Read-only workers fan out freely. But several `workspace-write` workers on the same working tree will collide on files — give each its own directory or git worktree, or run the writers serially. This is the same coherence trap as any multi-agent build: freeze who-owns-what before fanning out.
+
+Scale to the task: a handful of workers with clear, non-overlapping scopes — not a swarm. Each `codex exec` is a full GPT-5.x agent; they're expensive and heavy.
+
+## Sessions
+
+- `codex exec resume --last "..."` — continue the most recent session in this dir (serial follow-up: "keep going", "apply the top fix").
+- `codex exec resume <id> "..."` — continue a specific session (use the captured `thread_id`).
+- `codex resume` / `codex fork` — interactive picker / branch a session (human-driven).
+- `codex exec --ephemeral ...` — don't persist the session at all.
 
 ## Notes
 
-- Needs `codex` on PATH and a logged-in Codex CLI (`codex login`). If it isn't set up, say so rather than guessing.
-- `codex:rescue` still exists for the reflexive "I'm stuck, take over" handoff. This skill is for deliberate delegation — prefer it when you know what you're handing off.
+- Needs `codex` on PATH and a logged-in CLI (`codex login`). If it isn't set up, say so rather than guessing.
+- `codex:rescue` still exists for the reflexive "I'm stuck, take over" handoff. This skill is for deliberate delegation and fan-out — prefer it when you know what you're handing off.
