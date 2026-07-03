@@ -12,7 +12,7 @@ Clone and run the installer — it copies every skill into each detected agent
 (`~/.claude/skills`, `~/.codex/skills`):
 
 ```sh
-git clone https://github.com/mediavee/skills.git
+git clone https://github.com/falistos/skills.git
 cd skills
 ./install.sh
 ```
