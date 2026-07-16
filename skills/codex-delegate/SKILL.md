@@ -16,8 +16,9 @@ You drive `codex` directly — no wrapper. This skill is the knowledge: the righ
 `codex exec` runs Codex non-interactively. The sandbox is the safety boundary — it's the one thing you must set deliberately:
 
 ```
-codex exec -s read-only "PROMPT"        # inspect / diagnose / explain — touches nothing
-codex exec -s workspace-write "PROMPT"   # let Codex edit files (scoped implementation/fix)
+codex exec -s read-only "PROMPT"           # inspect / diagnose / explain — touches nothing
+codex exec -s workspace-write "PROMPT"      # let Codex edit files (scoped implementation/fix)
+codex exec -s danger-full-access "PROMPT"   # no sandbox — last resort, see Sandbox capability limits
 ```
 
 The intent (diagnose vs explain vs implement) lives in your prompt, not a flag — give Codex an objective, the relevant paths, the constraints, and the exact output you want (format, location, level of detail).
@@ -100,6 +101,8 @@ Scale to the task: a handful of workers with clear, non-overlapping scopes — n
 - **Network/DNS is cut**: clones and downloads fail — pre-stage pinned checkouts/vendored deps and point at them.
 - **`.git` is effectively read-only**: Codex never commits — you own commits, which conveniently forces your review/gates to run pre-commit.
 - **No servers or long-running processes in the sandbox** — the runtime owner runs them. Corollary: a test Codex couldn't execute is unvalidated by construction; route its first run to whoever owns the runtime.
+
+**Escape valve — `-s danger-full-access`.** When a limit has no workaround (a build that truly needs global caches, a task that must reach the network) and pre-staging doesn't fit, drop the sandbox deliberately rather than contorting the task. The safety boundary is gone, so compensate in the prompt: scope it to exactly the commands and paths needed, and prefer a discardable fresh thread. The sandbox being thread-for-life, an existing thread can't be upgraded — create a new one. (`--dangerously-bypass-approvals-and-sandbox` also skips approvals; meant only for environments that are already externally sandboxed.)
 
 ## Notes
 
