@@ -9,8 +9,8 @@ Copy this into `.orchestrate/<slug>/tasks/NN-<slug>.md`:
 
 - **Wave:** <n>
 - **Depends on:** [<task ids>, or none]
-- **Status:** todo            # todo → in-progress → done → verified
-- **Executor:** <opus | sonnet | haiku | codex>
+- **Status:** todo            # todo → in-progress → done → verified (failed = abandoned for re-planning)
+- **Executor:** <sonnet | opus | codex>
 
 ## Objective
 One specific, self-contained goal — what this task delivers, in a sentence or two.
@@ -56,6 +56,10 @@ executor can't (an artifact its author never executed is unvalidated by construc
 ---
 ## Dev record (worker fills this in on completion)
 
+### Status
+`DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT` — one line on the concern,
+blocker evidence, or question when not plain DONE.
+
 ### File List
 Every file created / modified / deleted.
 
@@ -68,5 +72,5 @@ section is a claim, not an omission.
 
 ### Attack points
 The weakest claims in this delivery — what a hostile reviewer should check first.
-Self-declaring these is mandatory when cross-review is armed.
+Mandatory: a counter-review runs on every wave and this is what aims it.
 ```

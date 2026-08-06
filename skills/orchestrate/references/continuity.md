@@ -18,7 +18,7 @@ Seal the handoff only after the last in-flight verdict lands — a pending REQUE
    - the **next action**, down to the first task file to write and its number;
    - the **established process**, with exact commands (gates, dispatch syntax, worker threads) — nothing the next session must re-derive;
    - known traps (tooling gotchas discovered this session);
-   - **owner decisions not to re-litigate**, each with its one-line rationale and date.
+   - **owner decisions not to re-litigate** (including rejected alternatives), each with its one-line rationale and date.
 2. **Rewrite the project memory** (condensed state + "read the REPRISE first" pointer) — again a full rewrite, purging stale incremental updates.
 3. Verify: clean tree, board consistent with reality, task reports up to date.
 4. Optionally a dated `HANDOFF-<milestone>.md` for a heavyweight boundary — but the REPRISE is the mechanism; standalone handoff docs get absorbed into it and go stale.
