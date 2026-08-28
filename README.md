@@ -33,6 +33,7 @@ Skills are plain folders — you can also just copy any `skills/<name>/` directo
 | [orchestrate](skills/orchestrate) | Build a large feature, project, or refactor as a lead orchestrator: lock the spec, freeze shared interface contracts, decompose into self-contained task files, dispatch sub-agents in dependency-ordered waves (one model per task), verify each wave, and run a final integration pass. |
 | [step-by-step](skills/step-by-step) | Iterate through a list of findings (from a review, analysis, or audit) one item at a time: explain, propose approaches, wait for your go, implement, verify, optionally Codex-review, then make an atomic commit per item. |
 | [codex-delegate](skills/codex-delegate) | Drive the OpenAI Codex CLI (`codex exec`) directly as a sub-agent for review, implementation, diagnosis, or research — including fanning out and tracking several Codex workers in parallel and managing their sessions. |
+| [feature](skills/feature) | Ship one feature, fix, or refactor through [Orca](https://orca.computer): pick the lane (solo / supervised / handoff), give the work its own worktree, hand each worker a self-contained brief carrying your house rules, counter-review the diff with a different model family, then land it. Requires the `orca` CLI. |
 
 ### orchestrate
 
@@ -45,6 +46,20 @@ phase, which is how independent workers produce a result that's actually consist
 
 It won't fan out for small changes — there's an explicit gate that falls back to a single
 linear pass when parallelism isn't worth the token cost.
+
+### feature
+
+For one unit of work, where `orchestrate` would be overkill. It treats Orca as the
+execution substrate: a worktree per unit, agents in its terminals, status on the card.
+
+The part that earns its keep is the **worker brief**. Agents launched into an Orca worktree
+see none of your conversation and don't inherit your global config — a Codex or Grok worker
+never reads your `CLAUDE.md`. So the skill carries your house rules into every brief
+verbatim, which is what stops you re-explaining them per worktree. Edit that block to make
+the skill yours.
+
+It also defaults to *not* fanning out. Coding parallelises badly; the lane table says when
+that's wrong.
 
 ## How skills work
 
