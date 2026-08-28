@@ -30,6 +30,7 @@ for skill in $SKILLS; do
     mkdir -p "$base"
     rm -rf "$dest"
     cp -R "$SRC/$skill" "$dest"
+    find "$dest" -name .DS_Store -type f -exec rm -f {} +
     echo "installed: $dest"
   done
 done
