@@ -20,7 +20,7 @@ cd skills
 Install only what you want:
 
 ```sh
-./install.sh orchestrate
+./install.sh feature
 ```
 
 Skills are plain folders — you can also just copy any `skills/<name>/` directory into
@@ -30,27 +30,14 @@ Skills are plain folders — you can also just copy any `skills/<name>/` directo
 
 | Skill | What it does |
 |---|---|
-| [orchestrate](skills/orchestrate) | Build a large feature, project, or refactor as a lead orchestrator: lock the spec, freeze shared interface contracts, decompose into self-contained task files, dispatch sub-agents in dependency-ordered waves (one model per task), verify each wave, and run a final integration pass. |
 | [step-by-step](skills/step-by-step) | Iterate through a list of findings (from a review, analysis, or audit) one item at a time: explain, propose approaches, wait for your go, implement, verify, optionally Codex-review, then make an atomic commit per item. |
 | [codex-delegate](skills/codex-delegate) | Drive the OpenAI Codex CLI (`codex exec`) directly as a sub-agent for review, implementation, diagnosis, or research — including fanning out and tracking several Codex workers in parallel and managing their sessions. |
 | [feature](skills/feature) | Ship one feature, fix, or refactor through [Orca](https://orca.computer): pick the lane (solo / supervised / handoff), give the work its own worktree, hand each worker a self-contained brief carrying your house rules, counter-review the diff with a different model family, then land it. Requires the `orca` CLI. |
 | [skillify](skills/skillify) | Turn the procedure that just worked in a session into a reusable skill — the steps that worked, the wrong turns that made it expensive, and the checks — or say plainly that it isn't worth capturing. |
 
-### orchestrate
-
-For work too large for one linear pass. The agent acts as an orchestrator that owns the
-*spine* — spec, architecture, frozen interface contracts, integration — and delegates the
-*leaves* (independent, well-specified units) to sub-agents running in parallel waves,
-picking the cheapest model that clears each task's bar. The design front-loads a shared
-contract layer before any fan-out and treats the final coherence pass as a first-class
-phase, which is how independent workers produce a result that's actually consistent.
-
-It won't fan out for small changes — there's an explicit gate that falls back to a single
-linear pass when parallelism isn't worth the token cost.
-
 ### feature
 
-For one unit of work, where `orchestrate` would be overkill. It treats Orca as the
+For one unit of work. It treats Orca as the
 execution substrate: a worktree per unit, agents in its terminals, status on the card.
 
 The part that earns its keep is the **worker brief**. Agents launched into an Orca worktree
