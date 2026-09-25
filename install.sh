@@ -2,7 +2,7 @@
 # Install skills from this collection into each detected agent (Claude Code, Codex).
 # Usage:
 #   ./install.sh                 install every skill
-#   ./install.sh orchestrate ... install only the named skills
+#   ./install.sh feature ...     install only the named skills
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
