@@ -1,13 +1,13 @@
 ---
 name: ui-sources
-description: Source real UI building blocks instead of inventing them — component libraries, shadcn-compatible registries, AI/agent interface kits, shader and motion tools, design token systems, and public design systems to study. Use when a UI needs a concrete component (chat interface, command menu, data table, drag-and-drop, animated number, gradient background, dashboard shell), when picking a component library or design system for a new app, when the answer is "where do I get this from", or when building an AI/agent interface (chat, tool calls, reasoning, approvals, voice, workflow canvas). Not for design critique, layout review, or visual polish — that is `impeccable`.
+description: Source real UI components, shadcn registries, AI/agent interface kits, shader and motion tools, design tokens and public design systems instead of inventing them. Use when a UI needs a concrete component (command menu, data table, animated number, gradient background), when picking a library or design system, when asking "where do I get this from", or when building an agent interface (chat, tool calls, approvals, voice). Critique and polish are `impeccable`.
 user-invocable: true
 argument-hint: "[what you need — e.g. 'chat UI', 'animated counter', 'non-react buttons', 'design system reference']"
 ---
 
 # UI Sources
 
-A catalogue of places to take real, working UI from. Browse it, pick what fits, ignore the rest.
+A catalogue of places to take real, working UI from.
 
 ## Routing
 
@@ -19,18 +19,16 @@ A catalogue of places to take real, working UI from. Browse it, pick what fits, 
 | Study how a real design system is built; token architecture | `reference/design-systems.md` |
 | Project is not React — Django, Rails, Laravel, Astro, plain HTML, Vue, Svelte | `reference/non-react.md` |
 
-## Neighbouring skills
+Neighbouring skills own their lanes: **`pick-ui-library`** (canonical React library per task; invoke it explicitly, it never self-triggers), **`baseline-ui`** (spacing/hierarchy/typography cleanup), **`emil-design-eng`** and **`review-animations`** (craft and motion judgement), **`impeccable`** (direction, critique, polish).
 
-Don't duplicate what these already do: **`pick-ui-library`** (canonical React library per task — invoke it explicitly, it never self-triggers), **`baseline-ui`** (fast spacing/hierarchy/typography cleanup), **`emil-design-eng`** and **`review-animations`** (craft and motion judgement), **`impeccable`** (design direction, critique, polish).
+## Ground rules
 
-## Two things worth respecting
-
-- **Install components, don't rewrite them from memory.** Use the CLI, or fetch canonical markdown (see `reference/discovery.md`). Component galleries render their code through JS, so fetched HTML is not a reliable source.
-- **Check the stack first.** Most of this ecosystem is React + Tailwind + Motion. If the project isn't, go to `reference/non-react.md` rather than proposing something unusable.
+- **Install components, don't rewrite them from memory**: use the CLI or fetch canonical markdown (`reference/discovery.md`). Galleries render code through JS, so fetched HTML is not a reliable source.
+- **Check the stack first.** This ecosystem is mostly React + Tailwind + Motion; otherwise go to `reference/non-react.md`.
 
 ## The base layer
 
-Unless a reason says otherwise the base is **shadcn/ui**, because nearly every source below distributes through its registry protocol:
+The base is **shadcn/ui** unless a reason says otherwise: nearly every source distributes through its registry protocol.
 
 ```bash
 pnpm dlx shadcn@latest init                 # once per project
@@ -38,10 +36,10 @@ pnpm dlx shadcn@latest add button           # official registry, no config
 pnpm dlx shadcn@latest add @magicui/globe   # third-party, needs a namespace
 ```
 
-Third-party namespaces are declared in `components.json`:
+Declare third-party namespaces in `components.json`:
 
 ```json
 { "registries": { "@magicui": "https://magicui.design/r/{name}.json" } }
 ```
 
-There is an official MCP server (`npx shadcn@latest mcp init --client claude`) that works with any shadcn-compatible registry. Worth suggesting when the user will be pulling components repeatedly in the same project.
+Suggest the official MCP server (`npx shadcn@latest mcp init --client claude`, works with any shadcn-compatible registry) when the user will pull components repeatedly in one project.
