@@ -1,0 +1,653 @@
+#!/usr/bin/env python3
+"""ci wait | ci stats: wait for a PR's checks and measure where CI time goes. Needs an authenticated gh."""
+import argparse
+import json
+import math
+import re
+import statistics
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+
+# Failure signatures, matched per line, case-insensitive; first match wins. "infra" signatures point at the
+# platform; "unclear" ones (network, timeouts) can come from the platform or from the code under test.
+RUNNER_PATH = r"(_work|actions-runner|/github/|/home/runner|_temp|/root/|\.cache|\.npm|\.gradle|/usr/local)"
+INFRA_PATTERNS = [
+    ("infra", "actions budget", r"actions budget|spending limit|account payments have failed"),
+    ("infra", "runner lost", r"received a shutdown signal|lost communication with the server|runner is offline"
+                    r"|no runner matching|hosted runner encountered an error"),
+    ("unclear", "timeout", r"exceeded the maximum execution time|has timed out after \d+ minutes?"),
+    ("infra", "no space left", r"no space left on device|\bENOSPC\b"),
+    ("infra", "runner permission", r"(EACCES|permission denied)[^\n]*" + RUNNER_PATH
+                          + r"|" + RUNNER_PATH + r"[^\n]*(EACCES|permission denied)"),
+    ("infra", "wrong architecture", r"exec format error|cannot execute binary file|wrong ELF class|bad CPU type"
+                           r"|incompatible architecture|qemu: uncaught target signal|fatal error: lfstack\.push"),
+    ("unclear", "network", r"could not resolve host|temporary failure in name resolution|connection timed out"
+                r"|connection reset by peer|\bETIMEDOUT\b|\bECONNRESET\b|\bEAI_AGAIN\b|\bENOTFOUND\b"
+                r"|tls handshake timeout|curl: \(\d+\)|rpc failed|early eof|socket hang up"
+                r"|(failed|unable) to download|api rate limit exceeded"),
+]
+INFRA_PATTERNS = [(kind, label, re.compile(rx, re.I)) for kind, label, rx in INFRA_PATTERNS]
+
+GREEN = {"success", "skipped", "neutral"}
+DUMP_LOG = {"failure", "timed_out", "startup_failure"}
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+LOG_TS = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?")
+NOISE_ANNOTATION = re.compile(r"^Process completed with exit code \d+\.?$")
+FIRST_CHECK_WAIT = 180
+POLL = 30
+RUN_CAP = 200
+WORKERS = 4  # GitHub's secondary rate limit punishes bursts of concurrent requests
+SLOW_STEPS = 8
+JOB_ROWS = 20
+
+
+class CiError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------- gh access
+
+def gh_raw(args, retries=3):
+    for attempt in range(retries):
+        p = subprocess.run(["gh"] + args, capture_output=True)
+        if p.returncode == 0:
+            return p.stdout.decode("utf-8", "replace")
+        err = p.stderr.decode("utf-8", "replace") + p.stdout.decode("utf-8", "replace")
+        limited = "rate limit" in err.lower()
+        if attempt == retries - 1 or ("HTTP 404" in err or "HTTP 403" in err) and not limited:
+            raise CiError("gh %s: %s" % (" ".join(args[:2]), err.strip()[:300]))
+        # Secondary rate limits clear within minutes; the token is shared with every other tool and agent.
+        time.sleep(60 * (attempt + 1) if limited else 2)
+
+
+def api(path):
+    return json.loads(gh_raw(["api", path]))
+
+
+def api_list(path, key):
+    """All items under `key` across pages (--paginate prints one JSON document per page)."""
+    text = gh_raw(["api", "--paginate", path]).strip()
+    dec, pos, items = json.JSONDecoder(), 0, []
+    while pos < len(text):
+        doc, end = dec.raw_decode(text, pos)
+        items.extend(doc[key] if isinstance(doc, dict) else doc)
+        pos = end
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+    return items
+
+
+def current_repo():
+    return json.loads(gh_raw(["repo", "view", "--json", "nameWithOwner"]))["nameWithOwner"]
+
+
+# ---------------------------------------------------------------- helpers
+
+def ts(value):
+    if not value:
+        return None
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+def secs(start, end):
+    a, b = ts(start), ts(end)
+    return (b - a).total_seconds() if a and b else None
+
+
+def fmt_dur(s):
+    if s is None:
+        return "-"
+    s = int(round(s))
+    if s >= 3600:
+        return "%dh%02dm" % (s // 3600, s % 3600 // 60)
+    if s >= 60:
+        return "%dm%02ds" % (s // 60, s % 60)
+    return "%ds" % s
+
+
+def p90(values):
+    values = sorted(values)
+    return values[math.ceil(0.9 * len(values)) - 1] if values else None
+
+
+def median(values):
+    return statistics.median(values) if values else None
+
+
+def table(headers, rows):
+    out = ["| " + " | ".join(headers) + " |", "|" + "|".join("---" for _ in headers) + "|"]
+    out += ["| " + " | ".join(str(c) for c in row) + " |" for row in rows]
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- classification and logs
+
+def clean_log(raw):
+    lines = []
+    for line in raw.lstrip("﻿").replace("\r", "").split("\n"):
+        lines.append(LOG_TS.sub("", ANSI.sub("", line)))
+    return lines
+
+
+def failed_step_lines(lines):
+    """Lines of the step holding the job's last ##[error], up to it; the runner's post-step cleanup is dropped."""
+    end = len(lines)
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].startswith("##[error]"):
+            end = i + 1
+            break
+    while end > 0 and not lines[end - 1].strip():
+        end -= 1
+    start = max((i + 1 for i in range(end) if lines[i].startswith("##[endgroup]")), default=0)
+    return lines[start:end]
+
+
+def classify(text, conclusion=None):
+    """(kind, cause, evidence): 'infra' or 'unclear' on a matching signature, else 'code' (no platform sign)."""
+    for line in text.split("\n"):
+        for kind, label, rx in INFRA_PATTERNS:
+            if rx.search(line):
+                return kind, label, line.strip()[:200]
+    if conclusion == "timed_out":
+        return "unclear", "timeout", None
+    return "code", None, None
+
+
+# ---------------------------------------------------------------- ci wait
+
+def parse_target(target, repo):
+    """Returns (pr_number, sha); either may be None before resolution."""
+    if target is None:
+        return None, None
+    t = target.lstrip("#")
+    if t.isdigit() and len(t) < 7:
+        return int(t), None
+    if re.fullmatch(r"[0-9a-fA-F]{7,40}", t):
+        return None, t
+    raise CiError("target must be a PR number or a commit SHA, got %r" % target)
+
+
+def resolve(target, repo_opt):
+    """(repo, pr number, head sha, base branch); pr and base are None for a bare SHA."""
+    repo = repo_opt or current_repo()
+    pr, sha = parse_target(target, repo)
+    if sha:
+        return repo, None, api("repos/%s/commits/%s" % (repo, sha))["sha"], None
+    args = ["pr", "view"] + ([str(pr)] if pr else []) + ["-R", repo, "--json", "number,headRefOid,baseRefName"]
+    data = json.loads(gh_raw(args))
+    return repo, data["number"], data["headRefOid"], data["baseRefName"]
+
+
+def required_rollup(repo, pr):
+    """GitHub's own list of the PR's required checks that exist so far (check runs and commit statuses,
+    source and target branch rules applied), as [{name, bucket, link}]."""
+    p = subprocess.run(["gh", "pr", "checks", str(pr), "-R", repo, "--required", "--json", "name,bucket,link"],
+                       capture_output=True)
+    text = p.stdout.decode("utf-8", "replace").strip()
+    if text.startswith("["):  # exit codes 1 and 8 still print the list when checks failed or are pending
+        return json.loads(text)
+    err = p.stderr.decode("utf-8", "replace")
+    if "no required checks reported" in err or "no checks reported" in err:
+        return []  # none created yet, or none configured: the caller tells them apart
+    raise CiError("gh pr checks: %s" % err.strip()[:300])
+
+
+def snapshot(repo, sha):
+    checks = api_list("repos/%s/commits/%s/check-runs?per_page=100" % (repo, sha), "check_runs")
+    runs = api_list("repos/%s/actions/runs?head_sha=%s&per_page=100" % (repo, sha), "workflow_runs")
+    return checks, runs
+
+
+def pending(checks, runs):
+    names = ["%s (%s)" % (c["name"], c["status"]) for c in checks if c["status"] != "completed"]
+    # A run can still create jobs (needs:) after every existing check is done.
+    names += ["run %s (%s)" % (r["name"], r["status"]) for r in runs if r["status"] != "completed"]
+    return names
+
+
+def collect_rows(repo, checks, runs):
+    """One row per Actions job plus one per non-Actions check, with timings and runner."""
+    rows = []
+
+    def jobs_of(run):
+        return run, api_list("repos/%s/actions/runs/%s/jobs?filter=latest&per_page=100" % (repo, run["id"]), "jobs")
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        for run, jobs in pool.map(jobs_of, runs):
+            for j in jobs:
+                rows.append({
+                    "id": j["id"], "check": j["name"], "name": "%s / %s" % (run["name"], j["name"]),
+                    "conclusion": j["conclusion"],
+                    "queue_s": secs(j["created_at"], j["started_at"]),
+                    "run_s": secs(j["started_at"], j["completed_at"]),
+                    "runner": j.get("runner_name") or "-", "url": j["html_url"], "steps": j.get("steps") or [],
+                    "actions": True,
+                })
+            if not jobs and run["conclusion"] not in GREEN:
+                rows.append({
+                    "id": None, "check": None, "name": run["name"], "conclusion": run["conclusion"], "queue_s": None,
+                    "run_s": None, "runner": "-", "url": run["html_url"], "steps": [], "actions": False,
+                })
+    for c in checks:
+        if c["app"]["slug"] != "github-actions":
+            rows.append({
+                "id": None, "check": c["name"], "name": c["name"], "conclusion": c["conclusion"], "queue_s": None,
+                "run_s": secs(c["started_at"], c["completed_at"]), "runner": "-", "url": c["html_url"],
+                "steps": [], "actions": False,
+            })
+    return rows
+
+
+def diagnose(repo, row):
+    """Fills failed_step, annotations, log_tail and classification of a failed job row."""
+    step = next((s for s in row["steps"] if s["conclusion"] in ("failure", "timed_out")), None) \
+        or next((s for s in row["steps"] if s["conclusion"] == "cancelled"), None)
+    row["failed_step"] = step["name"] if step else None
+    row["annotations"], row["log_tail"], scope = [], [], []
+    if row["actions"]:
+        try:
+            notes = api("repos/%s/check-runs/%s/annotations?per_page=100" % (repo, row["id"]))
+            row["annotations"] = [n["message"] for n in notes
+                                  if n["annotation_level"] == "failure" and not NOISE_ANNOTATION.match(n["message"])]
+        except CiError:
+            pass
+        try:
+            lines = clean_log(gh_raw(["api", "--allow-escape-sequences",
+                                      "repos/%s/actions/jobs/%s/logs" % (repo, row["id"])]))
+            scope = failed_step_lines(lines)
+            row["log_tail"] = scope[-40:]
+        except CiError:
+            row["log_tail"] = []  # job never started (budget block) or logs expired
+    row["class"], row["cause"], row["evidence"] = classify("\n".join(row["annotations"] + scope), row["conclusion"])
+
+
+def required_state(rollup, expected):
+    """(pending names, red) from the rollup; expected names from branch rules that have no check yet count
+    as pending, since a fan-in check only appears once the jobs it needs are done."""
+    seen = {c["name"] for c in rollup}
+    waiting = sorted({c["name"] for c in rollup if c["bucket"] == "pending"} | ((expected or set()) - seen))
+    return waiting, any(c["bucket"] in ("fail", "cancel") for c in rollup)
+
+
+def cmd_wait(args):
+    repo, pr, sha, base = resolve(args.target, args.repo)
+    if args.required and pr is None:
+        raise CiError("--required needs a PR: required checks depend on its base branch")
+    out = sys.stderr if args.json else sys.stdout
+    expected = required_checks(repo, base) if args.required else None
+    print("waiting for %s%s @ %s on %s (timeout %d min)" % (
+        repo, " #%d" % pr if pr else "", sha[:10], "its required checks" if args.required else "every check",
+        args.timeout), file=out, flush=True)
+    start, rollup = time.time(), []
+    while True:
+        checks, runs = snapshot(repo, sha)
+        if args.required:
+            rollup = required_rollup(repo, pr)
+        if not checks and not runs:
+            if time.time() - start >= FIRST_CHECK_WAIT:
+                print("no check appeared within %d s for %s" % (FIRST_CHECK_WAIT, sha[:10]))
+                return 3
+        else:
+            waiting = pending(checks, runs)
+            if args.required and (rollup or expected):
+                waiting, red = required_state(rollup, expected)
+                if red:
+                    break
+            if not waiting:
+                break
+            if time.time() - start >= args.timeout * 60:
+                hint = " (a required check that never appears is often a workflow skipped by on.paths)" \
+                    if args.required else ""
+                print("timeout after %d min, still pending: %s%s" % (args.timeout, ", ".join(waiting), hint))
+                return 2
+        time.sleep(POLL)
+
+    rows = collect_rows(repo, checks, runs)
+    req_names = {c["name"] for c in rollup}
+    for r in rows:
+        r["required"] = r["check"] in req_names
+    # Required commit statuses and other apps' checks have no Actions job: report them from the rollup.
+    known = {r["check"] for r in rows}
+    for c in rollup:
+        if c["name"] not in known:
+            rows.append({"id": None, "check": c["name"], "name": c["name"], "required": True, "queue_s": None,
+                         "run_s": None, "runner": "-", "url": c.get("link") or "-", "steps": [], "actions": False,
+                         "conclusion": {"pass": "success", "skipping": "skipped", "fail": "failure",
+                                        "cancel": "cancelled"}.get(c["bucket"])})
+    required = bool(rollup)
+    if args.required and not required:
+        print("no required check reported: judged on every check", file=out)
+    # Every finished failure is reported, since a fan-in check fails because of the jobs it needs.
+    failed = [r for r in rows if r["conclusion"] is not None and r["conclusion"] not in GREEN]
+    with ThreadPoolExecutor(WORKERS) as pool:
+        list(pool.map(lambda r: diagnose(repo, r) if r["conclusion"] in DUMP_LOG else None, failed))
+    for r in failed:
+        if "class" not in r:
+            r.update(failed_step=None, annotations=[], log_tail=[], cause=None, evidence=None, **{"class": "code"})
+    code = 1 if any(r["required"] or not required for r in failed) else 0
+
+    if args.json:
+        print(json.dumps({"repo": repo, "pr": pr, "sha": sha, "exit": code, "checks": [
+            {k: v for k, v in r.items() if k not in ("steps", "actions")} for r in rows]}, indent=2))
+        return code
+    width = max([len(r["name"]) for r in rows] + [4])
+    for r in sorted(rows, key=lambda r: r["name"]):
+        print("%s %s  %-9s  queue %-7s  run %-7s  %s" % (
+            "*" if r["required"] else " ", r["name"].ljust(width), r["conclusion"] or "pending",
+            fmt_dur(r["queue_s"]), fmt_dur(r["run_s"]), r["runner"]))
+    for r in failed:
+        label = r["class"] + (" (%s)" % r["cause"] if r["cause"] else "")
+        print("\nFAILED %s  [%s]\n  step: %s\n  %s" % (r["name"], label, r["failed_step"] or "-", r["url"]))
+        if r["evidence"]:
+            print("  matched: " + r["evidence"])
+        for note in r.get("annotations", []):
+            print("  annotation: " + note)
+        for line in r.get("log_tail", []):
+            print("  | " + line)
+    return code
+
+
+# ---------------------------------------------------------------- ci stats
+
+PR_EVENTS = ("pull_request", "pull_request_target", "merge_group")
+RED = ("failure", "timed_out", "startup_failure")
+
+
+def required_checks(repo, branch=None):
+    """Required status check names on a branch (default: the default branch), or None when none can be read."""
+    try:
+        branch = branch or api("repos/%s" % repo)["default_branch"]
+        names = set()
+        for rule in api("repos/%s/rules/branches/%s?per_page=100" % (repo, branch)):
+            if rule["type"] == "required_status_checks":
+                names.update(c["context"] for c in rule["parameters"]["required_status_checks"])
+        try:
+            prot = api("repos/%s/branches/%s/protection/required_status_checks" % (repo, branch))
+            names.update(prot.get("contexts") or [])
+        except CiError:
+            pass  # classic branch protection is readable by admins only
+        return names or None
+    except CiError:
+        return None
+
+
+def long_pole(jobs, end, verdict_s):
+    """The last job to finish by the verdict, ignoring joins and reports (under 5% of the verdict). A candidate
+    bottleneck only: the API does not say which jobs the required check waits for."""
+    done = [(run, j) for run, j in jobs if ts(j["completed_at"]) <= end]
+    if not done:
+        return None
+    real = [(run, j) for run, j in done if (secs(j["started_at"], j["completed_at"]) or 0) >= 0.05 * verdict_s]
+    run, j = max(real or done, key=lambda rj: rj[1]["completed_at"])
+    return run["name"], j["name"]
+
+
+def pr_verdicts(runs_jobs, required):
+    """One entry per PR head commit whose runs are all complete and that has every required check produced
+    by Actions: time from the first run's creation to the last of those checks (every job when the required
+    checks are unknown), reruns included. Returns (verdicts, commits left out, required checks never seen
+    in Actions, such as commit statuses or other apps)."""
+    by_sha = {}
+    for run, jobs in runs_jobs:
+        if run["event"] in PR_EVENTS:
+            by_sha.setdefault(run["head_sha"], []).append((run, jobs))
+    seen = {j["name"] for _, js in runs_jobs for j in js}
+    in_actions = (required & seen) if required else None
+    out, left_out = [], 0
+    for items in by_sha.values():
+        done = [(run, j) for run, js in items for j in js if j["status"] == "completed" and j.get("completed_at")]
+        if any(run["status"] != "completed" for run, _ in items) or \
+                (in_actions and not in_actions <= {j["name"] for _, j in done}):
+            left_out += 1
+            continue
+        gate = [(run, j) for run, j in done if j["name"] in in_actions] if in_actions else done
+        jobs = [(run, j) for run, j in done if j["conclusion"] != "skipped"]
+        if not gate:
+            left_out += 1
+            continue
+        start = min(ts(run["created_at"]) for run, _ in items)
+        end = max(ts(j["completed_at"]) for _, j in gate)
+        verdict_s = (end - start).total_seconds()
+        others = [(run, j) for run, j in jobs if not (in_actions and j["name"] in in_actions)]
+        out.append({"s": verdict_s, "red": any(j["conclusion"] not in GREEN for _, j in gate),
+                    "rerun": any((run.get("run_attempt") or 1) > 1 for run, _ in items),
+                    "pole": long_pole(others or jobs or gate, end, verdict_s)})
+    return out, left_out, sorted(required - seen) if required else []
+
+
+def fetch_runs(repo, days, cap, event, workflow):
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    base = "repos/%s/actions/%sruns?created=%%3E%%3D%s&per_page=100%s" % (
+        repo, "workflows/%s/" % workflow if workflow else "", since, "&event=" + event if event else "")
+    runs, total, page_no = [], 0, 1
+    while len(runs) < cap:
+        page = api("%s&page=%d" % (base, page_no))
+        total = page["total_count"]
+        runs += page["workflow_runs"]
+        if len(page["workflow_runs"]) < 100:
+            break
+        page_no += 1
+    return runs[:cap], total
+
+
+def repo_stats(repo, days, cap=RUN_CAP, event=None, workflow=None):
+    if event:
+        runs, total = fetch_runs(repo, days, cap, event, workflow)
+    else:  # PR runs only: on busy repos, scheduled and push runs would fill the sample
+        runs, total = [], 0
+        for ev in PR_EVENTS:
+            got, n = fetch_runs(repo, days, cap, ev, workflow)
+            runs, total = runs + got, total + n
+        runs = sorted(runs, key=lambda r: r["created_at"], reverse=True)[:cap]
+    required = required_checks(repo)
+
+    def jobs_of(run):
+        if run["status"] != "completed":
+            return run, []
+        return run, api_list("repos/%s/actions/runs/%s/jobs?filter=latest&per_page=100" % (repo, run["id"]), "jobs")
+
+    with ThreadPoolExecutor(WORKERS) as pool:
+        runs_jobs = list(pool.map(jobs_of, runs))
+
+    flows, jobs, steps = {}, {}, {}
+    for run, rjobs in runs_jobs:
+        if run["status"] != "completed":
+            continue
+        f = flows.setdefault((run["name"], run["event"]), {"n": 0, "wall": [], "fail": 0, "rerun": 0, "approval": 0})
+        f["n"] += 1
+        f["fail"] += run["conclusion"] in RED
+        f["approval"] += run["conclusion"] == "action_required"
+        f["rerun"] += (run.get("run_attempt") or 1) > 1
+        if run["conclusion"] in ("success", "failure"):
+            f["wall"].append(secs(run["created_at"], run["updated_at"]))
+        for j in rjobs:
+            if j["status"] != "completed" or j["conclusion"] == "skipped":
+                continue
+            g = jobs.setdefault((run["name"], j["name"]), {"n": 0, "queue": [], "run": [], "fail": 0, "cancel": 0})
+            g["n"] += 1
+            g["fail"] += j["conclusion"] in RED
+            g["cancel"] += j["conclusion"] == "cancelled"
+            if j.get("runner_name"):  # jobs that never reached a runner have no meaningful timing
+                g["queue"].append(secs(j["created_at"], j["started_at"]))
+                g["run"].append(secs(j["started_at"], j["completed_at"]))
+                for st in j.get("steps") or []:
+                    d = secs(st["started_at"], st["completed_at"])
+                    if st["conclusion"] != "skipped" and d is not None:
+                        steps.setdefault((run["name"], j["name"], st["name"]), []).append(d)
+    verdicts, left_out, external = pr_verdicts(runs_jobs, required)
+    oldest = min((r["created_at"] for r in runs), default=None)
+    return {"repo": repo, "runs": len(runs), "total_runs": total, "capped": total > len(runs), "oldest": oldest,
+            "required": sorted(required) if required else None, "workflow": workflow,
+            "verdicts": verdicts, "left_out": left_out, "external": external,
+            "flows": flows, "jobs": jobs, "steps": steps}
+
+
+def pct(part, whole):
+    return "%d%%" % round(100 * part / whole) if whole else "-"
+
+
+def poles(verdicts):
+    counts = {}
+    for v in verdicts:
+        if v["pole"]:
+            counts[v["pole"]] = counts.get(v["pole"], 0) + 1
+    return sorted(counts.items(), key=lambda kv: -kv[1])
+
+
+def render_stats(stats, days):
+    out = []
+    run_h = queue_h = 0.0
+    for s in stats:
+        cap = " (cap hit: newest %d of %d runs, back to %s)" % (s["runs"], s["total_runs"], s["oldest"]) \
+            if s["capped"] else ""
+        out.append("## %s: %d runs in %d days%s\n" % (s["repo"], s["runs"], days, cap))
+        v = s["verdicts"]
+        gate = "required checks of the default branch: " + ", ".join(s["required"]) if s["required"] \
+            else "required checks unreadable or none: every job counted"
+        notes = []
+        if s["external"]:
+            notes.append("not produced by Actions, so not measured: " + ", ".join(s["external"]))
+        if s["left_out"]:
+            notes.append("%d commits left out (runs unfinished or required checks missing)" % s["left_out"])
+        if s["workflow"]:
+            notes.append("only %s was read" % s["workflow"])
+        if v:
+            wall = [x["s"] for x in v]
+            out.append("PR time to verdict: %d commits, median %s, p90 %s, red %s, rerun %s\n(%s; first run "
+                       "created -> last such check completed%s)\n" % (
+                           len(v), fmt_dur(median(wall)), fmt_dur(p90(wall)), pct(sum(x["red"] for x in v), len(v)),
+                           pct(sum(x["rerun"] for x in v), len(v)), gate, "".join("; " + n for n in notes)))
+            jobs = s["jobs"]
+            out.append("Last substantial job before the verdict (candidate bottleneck; check what the "
+                       "required checks need):\n")
+            out.append(table(["workflow", "job", "share", "queue med", "run med", "run p90"], [
+                (wf, job, pct(n, len(v)), fmt_dur(median(jobs.get((wf, job), {}).get("queue", []))),
+                 fmt_dur(median(jobs.get((wf, job), {}).get("run", []))),
+                 fmt_dur(p90(jobs.get((wf, job), {}).get("run", [])))) for (wf, job), n in poles(v)[:5]]))
+            out.append("")
+        else:
+            out.append("No complete PR commit in this sample (%s%s).\n" % (gate, "".join("; " + n for n in notes)))
+        if s["flows"]:
+            out.append("Workflow runs (created -> last update; approval = waiting for a maintainer):\n")
+            out.append(table(["workflow", "event", "runs", "elapsed med", "elapsed p90", "failed", "approval",
+                              "reruns"], [
+                (wf, ev, f["n"], fmt_dur(median(f["wall"])), fmt_dur(p90(f["wall"])), pct(f["fail"], f["n"]),
+                 pct(f["approval"], f["n"]), pct(f["rerun"], f["n"])) for (wf, ev), f in sorted(s["flows"].items())]))
+            out.append("")
+        rows = []
+        for (wf, job), g in sorted(s["jobs"].items(), key=lambda kv: -(p90(kv[1]["run"]) or 0)):
+            run_h += sum(g["run"]) / 3600
+            queue_h += sum(g["queue"]) / 3600
+            rows.append((wf, job, g["n"], fmt_dur(median(g["queue"])), fmt_dur(p90(g["queue"])),
+                         fmt_dur(median(g["run"])), fmt_dur(p90(g["run"])), pct(g["fail"], g["n"]),
+                         pct(g["cancel"], g["n"])))
+        if rows:
+            out.append("Jobs, slowest first:\n")
+            out.append(table(["workflow", "job", "runs", "queue med", "queue p90", "run med", "run p90",
+                              "failed", "cancelled"], rows[:JOB_ROWS]))
+            if len(rows) > JOB_ROWS:
+                out.append("... %d more jobs (--json for all)" % (len(rows) - JOB_ROWS))
+            slow = sorted(((p90(d), k, len(d)) for k, d in s["steps"].items()), reverse=True)[:SLOW_STEPS]
+            out.append("\nSlowest steps by p90:\n")
+            out.append(table(["workflow", "job", "step", "p90", "n"],
+                             [(k[0], k[1], k[2], fmt_dur(d), n) for d, k, n in slow]))
+        out.append("")
+    out.append("Total: %.1f job-hours run, %.1f job-hours queued, %d repos "
+               "(jobs that never reached a runner or were skipped are not timed)" % (run_h, queue_h, len(stats)))
+    return "\n".join(out)
+
+
+def cmd_stats(args):
+    if not 1 <= args.runs <= 1000:
+        raise CiError("--runs must be between 1 and 1000 (GitHub caps filtered run listings at 1000)")
+    repos = list(args.repo or [])
+    if args.org:
+        listed = api("orgs/%s/repos?sort=pushed&direction=desc&per_page=100" % args.org)
+        repos += [r["full_name"] for r in listed if not r["archived"]][:args.active]
+    if not repos:
+        repos = [current_repo()]
+    repos = list(dict.fromkeys(repos))
+    stats = [repo_stats(r, args.days, args.runs, args.event, args.workflow) for r in repos]
+    if args.json:
+        print(json.dumps([{
+            "repo": s["repo"], "runs": s["runs"], "total_runs": s["total_runs"], "capped": s["capped"],
+            "oldest_run": s["oldest"], "required_checks": s["required"],
+            "pr_verdict": {"commits": len(s["verdicts"]), "left_out": s["left_out"],
+                           "not_measured_required": s["external"], "median_s": median([x["s"] for x in s["verdicts"]]),
+                           "p90_s": p90([x["s"] for x in s["verdicts"]]),
+                           "red": sum(x["red"] for x in s["verdicts"]),
+                           "rerun": sum(x["rerun"] for x in s["verdicts"]),
+                           "long_poles": [{"workflow": k[0], "job": k[1], "commits": n} for k, n in poles(s["verdicts"])]},
+            "workflows": [{"workflow": k[0], "event": k[1], "runs": f["n"], "elapsed_median_s": median(f["wall"]),
+                           "elapsed_p90_s": p90(f["wall"]), "failed": f["fail"], "approval": f["approval"],
+                           "reruns": f["rerun"]} for k, f in s["flows"].items()],
+            "jobs": [{"workflow": k[0], "job": k[1], "runs": g["n"], "queue_median_s": median(g["queue"]),
+                      "queue_p90_s": p90(g["queue"]), "run_median_s": median(g["run"]), "run_p90_s": p90(g["run"]),
+                      "failed": g["fail"], "cancelled": g["cancel"], "queue_total_s": sum(g["queue"]),
+                      "run_total_s": sum(g["run"])} for k, g in s["jobs"].items()],
+            "slowest_steps": [{"workflow": k[0], "job": k[1], "step": k[2], "p90_s": p90(d), "n": len(d)}
+                              for k, d in sorted(s["steps"].items(), key=lambda kv: -p90(kv[1]))[:SLOW_STEPS]],
+        } for s in stats], indent=2))
+    else:
+        print(render_stats(stats, args.days))
+    return 0
+
+
+# ---------------------------------------------------------------- cli
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):  # exit 2 is reserved for `ci wait` timeouts
+        self.print_usage(sys.stderr)
+        sys.stderr.write("ci: %s\n" % message)
+        sys.exit(4)
+
+
+def build_parser():
+    p = Parser(prog="ci", description="Wait for CI and measure it through gh. Exit codes of wait: "
+                                      "0 green, 1 failed, 2 timeout, 3 nothing to wait for, 4 tool error.")
+    sub = p.add_subparsers(dest="cmd", required=True, parser_class=Parser)
+    w = sub.add_parser("wait", help="block until a PR's checks finish, then report them",
+                       description="Wait for every check of a PR head (default: current branch's PR) and print one "
+                                   "line per check, plus the failed step, log tail and suspected cause (infra, unclear "
+                                   "or code) of each failure.")
+    w.add_argument("target", nargs="?", help="PR number or commit SHA (default: PR of the current branch)")
+    w.add_argument("-R", "--repo", help="owner/repo (default: current repo)")
+    w.add_argument("--required", action="store_true",
+                   help="stop once the required checks decide (* in the output); others may still run")
+    w.add_argument("--timeout", type=int, default=60, metavar="MIN", help="give up after MIN minutes (default 60)")
+    w.add_argument("--json", action="store_true", help="machine-readable output")
+    w.set_defaults(fn=cmd_wait)
+    s = sub.add_parser("stats", help="where CI time goes: PR time to verdict, long poles, queue, run, failures",
+                       description="Over the last days: PR time to verdict on the required checks and its long poles; "
+                                   "per workflow, elapsed time, failure, approval and rerun rates; per job, median/p90 "
+                                   "queue and run time; the %d slowest steps. One API call per run read." % SLOW_STEPS)
+    s.add_argument("-R", "--repo", action="append", metavar="OWNER/REPO", help="repeatable (default: current repo)")
+    s.add_argument("--org", help="also take the most recently pushed repos of this org")
+    s.add_argument("--active", type=int, default=10, metavar="N", help="with --org: how many repos (default 10)")
+    s.add_argument("--days", type=int, default=7, help="look-back window (default 7)")
+    s.add_argument("--event", help="read runs of this event, e.g. push or schedule, instead of the PR events "
+                                   "(pull_request, pull_request_target, merge_group)")
+    s.add_argument("--workflow", metavar="FILE", help="only this workflow file, e.g. ci.yml")
+    s.add_argument("--runs", type=int, default=RUN_CAP, metavar="N",
+                   help="read at most the newest N runs per repo, 1-1000 (default %d)" % RUN_CAP)
+    s.add_argument("--json", action="store_true", help="machine-readable output")
+    s.set_defaults(fn=cmd_stats)
+    return p
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        return args.fn(args)
+    except CiError as e:
+        print("ci: %s" % e, file=sys.stderr)
+        return 4
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())
