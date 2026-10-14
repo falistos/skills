@@ -26,6 +26,7 @@ Skills are plain folders — you can also copy any `skills/<name>/` directory by
 | Skill | What it does |
 |---|---|
 | [design-pipeline](skills/design-pipeline) | Take a UI from a rough idea to a reviewed build: named art directions to pick from, the choice locked into a `DESIGN.md`, then build and review against it. Web, desktop and mobile. |
+| [fast-ci](skills/fast-ci) | Make GitHub Actions CI/CD fast and dependable: measure how long a PR waits for its required checks and what sets that wait, then fix it, avoiding the required-check, cache, concurrency and release traps. Ships `scripts/ci` (`stats`, `wait`), needs Python 3.9+ and `gh`. |
 | [ui-sources](skills/ui-sources) | Source real UI building blocks instead of inventing them: component libraries, shadcn-compatible registries, AI interface kits, motion and shader tools, design tokens, public design systems. |
 
 ## How skills work
