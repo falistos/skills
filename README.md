@@ -31,7 +31,6 @@ so every machine has the same set;
 | [design-pipeline](skills/design-pipeline) | Take a UI from a rough idea to named art directions, a `DESIGN.md`, a build and a review |
 | [diagnosing-bugs](skills/diagnosing-bugs) | Reproduce, explain and fix a bug, crash, failing test or performance regression |
 | [docs](skills/docs) | Write operator-facing docs: setup, configuration, commands, permissions, features |
-| [kill-slop](skills/kill-slop) | Keep a change minimal and its comments limited to the non-obvious why |
 | [overhaul](skills/overhaul) | Review a whole project on six axes, then apply an approved plan in proven lots (invoked by hand) |
 | [python-review](skills/python-review) | Review Python for bugs, async, security, design and 3.12+ idioms |
 | [questionnaire](skills/questionnaire) | Draft an async questionnaire for facts only someone else knows |
