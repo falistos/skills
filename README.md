@@ -44,7 +44,7 @@ so every machine has the same set;
 
 [`external.txt`](external.txt) lists them, one source per line: Matt Pocock's `codebase-design`,
 `grilling` and `writing-for-agents`; `term`; `impeccable`; Vercel's `web-design-guidelines`; `shadcn`;
-the BeautifulRust skills; and Emil Kowalski's motion and interface skills.
+the BeautifulRust skills; and Emil Kowalski's design-engineering, animation, worst-case and mobile skills.
 
 ## Adding a skill
 
