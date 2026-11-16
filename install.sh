@@ -74,6 +74,16 @@ DESTS=""
 failed=0
 [ "$EXTERNAL" = 1 ] && { external || failed=1; }
 
+# A skill removed from this repo leaves a dangling link behind in each agent's folder.
+if [ "$EXTERNAL" = 1 ]; then
+  for base in $DESTS; do
+    for dest in "$base"/*; do
+      [ -L "$dest" ] && [ ! -e "$dest" ] || continue
+      case $(readlink "$dest") in "$SRC"/*) rm -f "$dest"; echo "removed: $dest" ;; esac
+    done
+  done
+fi
+
 for skill in $SKILLS; do
   [ -d "$SRC/$skill" ] || { echo "skip: unknown skill '$skill'"; continue; }
   for base in $DESTS; do
