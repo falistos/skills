@@ -44,5 +44,5 @@ catalog.
 
 ## Errors
 
-Expected absence/failure and loop exits use values (`Optional`/Result), per team `context/rules.md`;
+Expected absence/failure and loop exits use values (`Optional`/Result), unless the repo rules say otherwise;
 exceptions represent exceptional failures.

@@ -5,7 +5,7 @@ description: "Use when implementing, fixing or cleaning up code, writing docstri
 
 # Kill slop
 
-Apply the scope, simplicity and comment rules in `agents/plugins/dev/context/rules.md`; the checks below
+Apply the scope, simplicity and comment rules of the always-on instructions, if any; the checks below
 decide file shape and diff size.
 
 ## File shape

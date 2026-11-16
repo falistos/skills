@@ -28,7 +28,7 @@ class or a reason for exclusion.
 
 ## 3. Choose and prove a mechanism
 
-Use the prevention hierarchy in `agents/plugins/dev/context/rules.md` (architecture/API → type → lint/CI/gate
+Prevent with the smallest effective mechanism, in this order (architecture/API → type → lint/CI/gate
 → judgement rule → skill):
 
 - Architecture/API: one state owner, one supported path, hidden internals and one source of truth; remove

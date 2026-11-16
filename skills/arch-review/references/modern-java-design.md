@@ -1,7 +1,7 @@
 # Modern Java as design tools
 
 For tiers 5/7. Report visible gains in valid-state modeling, exhaustiveness, immutability or intent, not
-syntax alone. Respect the configured Java target and team Java rules in `agents/plugins/dev/context/rules.md`.
+syntax alone. Respect the configured Java target and the repo's Java rules.
 
 ## Modeling
 

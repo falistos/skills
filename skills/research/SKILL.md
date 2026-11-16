@@ -9,8 +9,8 @@ Record the bounded question, decision it informs and notes path. Research direct
 a substantial independent investigation while the main thread progresses, subject to harness rules and
 context/output cost. A worker does its assigned research itself.
 
-1. Use primary docs, source, release notes, specs or first-party APIs. Blogs/answers are leads only. Follow
-   source-verification and temporary-clone rules in `agents/plugins/dev/context/rules.md`; pin readings to
+1. Use primary docs, source, release notes, specs or first-party APIs. Blogs/answers are leads only. Clone a
+   repository to study into a `mktemp -d` directory; pin readings to
    version/tag/commit.
 2. Cite every claim with URL/section or `repo@sha:path:line`; mark uncited claims `assumed`.
 3. Separate source statements, executed checks (command/output), open questions and contradictions.
