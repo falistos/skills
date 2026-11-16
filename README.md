@@ -1,53 +1,61 @@
 # skills
 
-A collection of [Agent Skills](https://agentskills.io) for [Claude Code](https://claude.com/claude-code) (and other skill-aware agents like Codex).
+My agent stack: the [Agent Skills](https://agentskills.io) I write, plus the third-party skills I follow.
+They work with Claude Code, Codex, Grok and any agent that reads `~/.agents/skills`.
 
-Each skill is a self-contained folder with a `SKILL.md` — a set of instructions the
-agent loads on demand when the task matches. They encode workflows worth doing the
-same careful way every time, so you don't have to re-explain them.
+An agent sees each skill's `name` and `description` and reads the full `SKILL.md` only when a task
+matches; files beside it (`references/`, `assets/`, scripts) load from there on demand.
 
 ## Install
-
-Clone and run the installer. It copies every skill into each detected agent
-(`~/.claude/skills` for Claude Code, `~/.agents/skills` for Codex and other skill-aware agents):
 
 ```sh
 git clone https://github.com/falistos/skills.git
 cd skills
-./install.sh                     # every skill
-./install.sh design-pipeline     # only the named ones
-./install.sh --link              # symlink to the checkout instead: a pull updates every agent
+./install.sh --link              # link every skill to this checkout and add external.txt
+./install.sh design-pipeline     # copy only the named skills
 ```
 
-Skills are plain folders — you can also copy any `skills/<name>/` directory by hand.
+`--link` makes the checkout the live source: a `git pull` or an edit here reaches every agent at once.
+`external.txt` is applied with `npx skills` when it changes, and a skill removed from it is uninstalled (skills
+from other sources are left alone);
+`npx skills update -g` keeps them current.
 
-## Skills
+## My skills
 
 | Skill | What it does |
 |---|---|
-| [design-pipeline](skills/design-pipeline) | Take a UI from a rough idea to a reviewed build: named art directions to pick from, the choice locked into a `DESIGN.md`, then build and review against it. Web, desktop and mobile. |
-| [ui-sources](skills/ui-sources) | Source real UI building blocks instead of inventing them: component libraries, shadcn-compatible registries, AI interface kits, motion and shader tools, design tokens, public design systems. |
+| [arch-review](skills/arch-review) | Review a Java project's architecture, with alternatives and a refactoring plan |
+| [blast-radius](skills/blast-radius) | Prove what a small diff can break before merging it |
+| [clean-copy](skills/clean-copy) | Write or tighten user-facing strings |
+| [correct](skills/correct) | Turn a repeated mistake or a retrospective into a rule or a check that prevents it |
+| [design-pipeline](skills/design-pipeline) | Take a UI from a rough idea to named art directions, a `DESIGN.md`, a build and a review |
+| [diagnosing-bugs](skills/diagnosing-bugs) | Reproduce, explain and fix a bug, crash, failing test or performance regression |
+| [docs](skills/docs) | Write operator-facing docs: setup, configuration, commands, permissions, features |
+| [kill-slop](skills/kill-slop) | Keep a change minimal and its comments limited to the non-obvious why |
+| [overhaul](skills/overhaul) | Review a whole project on six axes, then apply an approved plan in proven lots (invoked by hand) |
+| [python-review](skills/python-review) | Review Python for bugs, async, security, design and 3.12+ idioms |
+| [questionnaire](skills/questionnaire) | Draft an async questionnaire for facts only someone else knows |
+| [research](skills/research) | Compare how serious projects solve a problem, or check API and version facts at the source |
+| [skillify](skills/skillify) | Capture a hard-won procedure as a skill |
+| [step-by-step](skills/step-by-step) | Walk review findings one by one, with validation and a commit each |
+| [ui-sources](skills/ui-sources) | Source real UI components, registries, kits, tokens and design systems |
+| [ux-review](skills/ux-review) | Find a tool's missing operations and operator use cases |
 
-## How skills work
+## Third-party skills
 
-An agent sees each skill's `name` + `description` and consults the full `SKILL.md` only
-when a task matches. Anything under a skill folder (templates in `assets/`, docs in
-`references/`, scripts in `scripts/`) loads lazily from there. Keeping `SKILL.md` lean and
-pushing detail into those files is deliberate — it's what keeps the always-on cost low.
+[`external.txt`](external.txt) lists them, one source per line: Matt Pocock's `codebase-design`,
+`grilling` and `writing-for-agents`; `term`; `impeccable`; Vercel's `web-design-guidelines`; `shadcn`;
+the BeautifulRust skills; and Emil Kowalski's motion and interface skills.
 
 ## Adding a skill
 
-1. Create `skills/<name>/SKILL.md` with `name` and `description` frontmatter.
-2. Put templates/docs/scripts alongside it as needed.
+1. Create `skills/<name>/SKILL.md` with `name` (the folder's name) and a `description` that says when to load it.
+2. Put references, templates or scripts beside it.
 3. Add a row to the table above.
-4. `./install.sh --link <name>` to try it locally.
+4. `./install.sh --link <name>` to try it.
 
-## Related
-
-Some tools live in their own repos when they're more than a skill (a CLI, a service):
-
-- [term](https://github.com/mediavee/term) — persistent tmux-backed terminal sessions for agents.
+A third-party skill is one line in `external.txt`, then `./install.sh`.
 
 ## License
 
-[MIT](LICENSE) © Mediavee
+[MIT](LICENSE) © Mediavee. [diagnosing-bugs](skills/diagnosing-bugs/NOTICE) and [questionnaire](skills/questionnaire/NOTICE) credit the work they adapt.
