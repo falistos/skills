@@ -10,7 +10,6 @@ HERE=$(cd "$(dirname "$0")" && pwd -P)
 SRC="$HERE/skills"
 LIST="$HERE/external.txt"
 STAMP="$HOME/.agents/.external-skills.sum"
-MANAGED="$HOME/.agents/.external-skills"
 LOCK="$HOME/.agents/.skill-lock.json"
 
 [ -d "$SRC" ] || { echo "error: $SRC not found (run from a checkout of the repo)"; exit 1; }
@@ -26,17 +25,16 @@ else
   EXTERNAL=1
 fi
 
-# external.txt is applied only when it changed: npx skills add fetches every source. Only skills this script
-# installed (MANAGED) or npx copies of this repo's own skills are removed, never another tool's.
+# external.txt is applied only when it changed: npx skills add fetches every source. It is the whole list:
+# every other npx skill is removed, so each machine ends up with the same set.
 external() {
   command -v npx >/dev/null 2>&1 || { echo "skip external.txt: npx is missing"; return 0; }
   sum=$(cksum < "$LIST")
   [ "$(cat "$STAMP" 2>/dev/null)" = "$sum" ] && return 0
   wanted=$(grep -v '^#' "$LIST" | awk '{ for (i = 2; i <= NF; i++) print $i }')
-  stale=$(cat "$MANAGED" 2>/dev/null || true)
+  stale=
   if [ -f "$LOCK" ] && command -v jq >/dev/null 2>&1; then
-    stale="$stale
-$(jq -r '.skills | to_entries[] | select(.value.source == "falistos/skills") | .key' "$LOCK")"
+    stale=$(jq -r '.skills | keys[]' "$LOCK")
   fi
   failed=0
   for name in $stale; do
@@ -62,7 +60,6 @@ $(jq -r '.skills | to_entries[] | select(.value.source == "falistos/skills") | .
   } || failed=1
   [ "$failed" = 0 ] || return 1
   mkdir -p "$(dirname "$STAMP")"
-  printf '%s\n' "$wanted" > "$MANAGED"
   printf '%s\n' "$sum" > "$STAMP"
 }
 
