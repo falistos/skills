@@ -16,8 +16,8 @@ cd skills
 ```
 
 `--link` makes the checkout the live source: a `git pull` or an edit here reaches every agent at once.
-`external.txt` is applied with `npx skills` when it changes, and a skill removed from it is uninstalled (skills
-from other sources are left alone);
+`external.txt` is the complete list of npx skills: applied when it changes, it uninstalls any other npx skill,
+so every machine has the same set;
 `npx skills update -g` keeps them current.
 
 ## My skills
