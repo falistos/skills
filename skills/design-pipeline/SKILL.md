@@ -1,6 +1,6 @@
 ---
 name: design-pipeline
-description: Design or redesign a UI from a rough idea — named art directions to choose from, locked into a DESIGN.md, then built and reviewed. Use for "je veux designer une app de X", "propose-moi des directions", "design me a dashboard", "refais cette page". Web, desktop, mobile. Reviewing an existing UI without designing is `web-design-guidelines`.
+description: Design or redesign a UI from a rough idea — named art directions to choose from, locked into a DESIGN.md, then built and reviewed. Use for "je veux designer une app de X", "propose-moi des directions", "design me a dashboard", "refais cette page". Web, desktop, mobile. Reviewing an existing UI without designing is `impeccable`.
 user-invocable: true
 argument-hint: "[what you're designing — e.g. 'a dashboard for X', 'landing page', or nothing at all]"
 ---

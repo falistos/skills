@@ -1,12 +1,12 @@
 ---
 name: correct
-description: "Use after an owner correction (\"encore la même erreur\"), for a retrospective (\"retro\"), or when closing a piece of work with lessons, to prevent repeated mistakes."
+description: "Use after an owner correction (\"encore la même erreur\"), for a retrospective (\"retro\"), when closing a piece of work with lessons, or to capture a hard-won procedure as a skill (\"make that a skill\", \"garde ça\", \"on refera pareil\", \"skillify\")."
 ---
 
 # Correct
 
-Make the shortest path a fresh agent copies the right one; prose advises, mechanisms fail loudly. Successful
-procedures belong to `skillify`.
+Make the shortest path a fresh agent copies the right one; prose advises, mechanisms fail loudly. A successful
+procedure worth keeping goes to section 4.
 
 ## 1. Collect
 
@@ -44,6 +44,20 @@ snippet and capture red output; run the same command green locally and in CI. Ke
 line with a reason. Delete rules made unnecessary by the mechanism.
 
 Done when every class has a ready-to-merge change or an explicit reason it remains open.
+
+## 4. Capture a procedure as a skill
+
+Write one only if it is repeatable here, needed several attempts or knowledge not readily rediscovered, and a fresh
+agent cannot recover it from the code. Otherwise say so; repo knowledge goes in an AGENTS.md line or a comment.
+
+From the session, take: the trigger as seen before the answer was known (the description); the ordered steps that
+worked, with exact commands, paths, flags and versions; the wrong turns and why they failed; each step's success
+check; where the procedure stops applying. Point to specs, service docs and commits by path instead of copying them.
+
+Load `writing-for-agents` when installed and follow the target repo's authoring rules (`name` = folder). Keep it to
+one screen; split a long one into diagnosis and a named fix. Shared skills go to their skills repo through a PR;
+repo-specific ones to `.agents/skills/<name>/` with a `.claude/skills/<name>` symlink. Honor an explicit path; ask
+before another location. Done when the description would trigger on the original problem six months later.
 
 ## Reply
 

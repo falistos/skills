@@ -4,7 +4,6 @@
 mattpocock/skills codebase-design grilling writing-for-agents
 mediavee/term term
 pbakaus/impeccable impeccable
-vercel-labs/agent-skills web-design-guidelines
 shadcn-ui/ui shadcn
-morganlinton/BeautifulRust rust-best-practices rust-review rust-port
+morganlinton/BeautifulRust rust-best-practices rust-review
 emilkowalski/skills animate break-ui emil-design-eng mobile-native review-animations

@@ -18,7 +18,7 @@ Load `density.md` and run the deletion pass. It is mechanical, needs no taste, a
 
 ## Pass 3 — Checklist
 
-Invoke **`web-design-guidelines`**: 100+ concrete rules (focus handling, form semantics, `tabular-nums`, tap targets, `prefers-reduced-motion`, hover gating on touch, text-size adjust, contrast). Take its output as a defect list.
+Invoke **`impeccable audit`** (accessibility, performance, responsive, theming): focus handling, form semantics, tap targets, `prefers-reduced-motion`, contrast. Take its output as a defect list.
 
 ## Pass 4 — Motion
 
