@@ -25,26 +25,22 @@ so every machine has the same set;
 | Skill | What it does |
 |---|---|
 | [arch-review](skills/arch-review) | Review a Java project's architecture, with alternatives and a refactoring plan |
-| [blast-radius](skills/blast-radius) | Prove what a small diff can break before merging it |
 | [clean-copy](skills/clean-copy) | Write or tighten user-facing strings |
-| [correct](skills/correct) | Turn a repeated mistake or a retrospective into a rule or a check that prevents it |
+| [correct](skills/correct) | Turn a repeated mistake or a retrospective into a rule or a check that prevents it, or a hard-won procedure into a skill |
 | [design-pipeline](skills/design-pipeline) | Take a UI from a rough idea to named art directions, a `DESIGN.md`, a build and a review |
 | [diagnosing-bugs](skills/diagnosing-bugs) | Reproduce, explain and fix a bug, crash, failing test or performance regression |
 | [docs](skills/docs) | Write operator-facing docs: setup, configuration, commands, permissions, features |
 | [overhaul](skills/overhaul) | Review a whole project on six axes, then apply an approved plan in proven lots (invoked by hand) |
-| [python-review](skills/python-review) | Review Python for bugs, async, security, design and 3.12+ idioms |
 | [questionnaire](skills/questionnaire) | Draft an async questionnaire for facts only someone else knows |
 | [research](skills/research) | Compare how serious projects solve a problem, or check API and version facts at the source |
-| [skillify](skills/skillify) | Capture a hard-won procedure as a skill |
 | [step-by-step](skills/step-by-step) | Walk review findings one by one, with validation and a commit each |
 | [ui-sources](skills/ui-sources) | Source real UI components, registries, kits, tokens and design systems |
-| [ux-review](skills/ux-review) | Find a tool's missing operations and operator use cases |
 
 ## Third-party skills
 
 [`external.txt`](external.txt) lists them, one source per line: Matt Pocock's `codebase-design`,
-`grilling` and `writing-for-agents`; `term`; `impeccable`; Vercel's `web-design-guidelines`; `shadcn`;
-the BeautifulRust skills; and Emil Kowalski's design-engineering, animation, worst-case and mobile skills.
+`grilling` and `writing-for-agents`; `term`; `impeccable`; `shadcn`;
+the BeautifulRust `rust-best-practices` and `rust-review`; and Emil Kowalski's design-engineering, animation, worst-case and mobile skills.
 
 ## Adding a skill
 
